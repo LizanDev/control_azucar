@@ -1,4 +1,7 @@
 .env
+control_alimentacion.json
+control_azucar_app_backup.py
+.github
 # Python
 __pycache__/
 *.py[cod]

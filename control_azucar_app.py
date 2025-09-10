@@ -654,7 +654,7 @@ class ControlAzucarApp:
         """Mostrar ventana con historial de registros agrupados por días"""
         historial_window = tk.Toplevel(self.root)
         historial_window.title("📋 Historial de Registros")
-        historial_window.geometry("1300x700")
+        historial_window.geometry("1400x700")
 
         # Frame principal
         main_frame = ttk.Frame(historial_window, padding="10")
@@ -664,7 +664,7 @@ class ControlAzucarApp:
         titulo_frame = ttk.Frame(main_frame)
         titulo_frame.pack(fill=tk.X, pady=(0, 15))
         
-        ttk.Label(titulo_frame, text="📊 Historial Agrupado por Días", 
+        ttk.Label(titulo_frame, text="📊 Historial con Checkboxes", 
                  font=("Arial", 14, "bold")).pack(side=tk.LEFT)
         
         # Estadísticas rápidas
@@ -676,24 +676,32 @@ class ControlAzucarApp:
                      text=f"📈 {total_registros} registros • {fechas_unicas} días • {promedio_por_dia:.1f} reg/día",
                      font=("Arial", 10, "italic"), foreground="gray").pack(side=tk.RIGHT)
 
-        # Crear Treeview jerárquico
-        tree = ttk.Treeview(main_frame, show="tree headings", height=25)
+        # Frame contenedor horizontal
+        contenedor_horizontal = ttk.Frame(main_frame)
+        contenedor_horizontal.pack(fill=tk.BOTH, expand=True)
+
+        # Frame para el tree (lado izquierdo)
+        tree_frame = ttk.Frame(contenedor_horizontal)
+        tree_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 15))
+
+        # Crear Treeview con checkboxes
+        tree = ttk.Treeview(tree_frame, show="tree headings", height=25, selectmode="none")
         
-        # Configurar columnas
-        tree["columns"] = ("Hora", "Comida", "Azúcar", "Alimentos", "Fuente")
+        # Configurar columnas con checkbox
+        tree["columns"] = ("checkbox", "Hora", "Azúcar", "Alimentos", "Fuente")
         tree.heading("#0", text="📅 Fecha / 🍽️ Registros", anchor="w")
+        tree.heading("checkbox", text="☑️", anchor="center")
         tree.heading("Hora", text="🕐 Hora")
-        tree.heading("Comida", text="🍽️ Comida")
         tree.heading("Azúcar", text="📊 Azúcar")
         tree.heading("Alimentos", text="🥗 Alimentos")
         tree.heading("Fuente", text="📷 Origen")
 
         # Configurar anchos de columnas
         tree.column("#0", width=200, minwidth=150)
+        tree.column("checkbox", width=50, minwidth=50, anchor="center")
         tree.column("Hora", width=80, minwidth=60)
-        tree.column("Comida", width=150, minwidth=100)
-        tree.column("Azúcar", width=100, minwidth=80)
-        tree.column("Alimentos", width=300, minwidth=200)
+        tree.column("Azúcar", width=120, minwidth=80)
+        tree.column("Alimentos", width=280, minwidth=200)
         tree.column("Fuente", width=100, minwidth=80)
 
         # Agrupar registros por fecha
@@ -761,9 +769,15 @@ class ControlAzucarApp:
             texto_dia = f"📅 {fecha_formateada}"
             estadisticas_dia = f"📊 Promedio: {promedio_dia:.0f} mg/dL (↓{min_dia} ↑{max_dia}) • {len(registros_del_dia)} registros"
             
-            dia_id = tree.insert("", "end", text=texto_dia, values=("", "", estadisticas_dia, "", ""), open=True)
+            dia_id = tree.insert("", "end", text=texto_dia, values=("", "", estadisticas_dia, "", "", ""), open=True)
             
-            # Agregar registros como hijos
+            # Inicializar mapeo si es necesario
+            if not hasattr(self, '_tree_registro_map'):
+                self._tree_registro_map = {}
+            if not hasattr(self, '_checkbox_states'):
+                self._checkbox_states = {}
+            
+            # Agregar registros como hijos con checkboxes
             for registro in registros_del_dia:
                 comida_nombre = registro.get("nombre_comida", registro.get("tipo_comida", "Sin nombre"))
                 alimentos_str = ", ".join(registro["alimentos"][:3])  # Mostrar solo primeros 3 alimentos
@@ -805,40 +819,83 @@ class ControlAzucarApp:
                 else:
                     azucar_texto = "Sin datos"
                 
-                tree.insert(dia_id, "end", 
+                item_id = tree.insert(dia_id, "end", 
                            text=f"   🍽️ {comida_nombre}",
                            values=(
+                               "☐",  # Checkbox inicial (sin marcar)
                                registro["hora"],
-                               "",
                                azucar_texto,
                                alimentos_str,
                                icono_fuente
                            ))
+                
+                # Mapear item_id al registro para poder acceder después
+                self._tree_registro_map[item_id] = registro
+                self._checkbox_states[item_id] = False  # Estado inicial: sin marcar
 
-        # Scrollbars
-        v_scrollbar = ttk.Scrollbar(main_frame, orient=tk.VERTICAL, command=tree.yview)
-        h_scrollbar = ttk.Scrollbar(main_frame, orient=tk.HORIZONTAL, command=tree.xview)
+        # Función para manejar clicks en checkboxes
+        def on_tree_click(event):
+            item = tree.identify_row(event.y)
+            if item and item in self._tree_registro_map:  # Solo registros, no fechas
+                column = tree.identify_column(event.x)
+                if column == "#1":  # Columna de checkbox
+                    # Cambiar estado
+                    current_state = self._checkbox_states.get(item, False)
+                    new_state = not current_state
+                    self._checkbox_states[item] = new_state
+                    
+                    # Actualizar visual
+                    checkbox_text = "☑️" if new_state else "☐"
+                    values = list(tree.item(item, "values"))
+                    values[0] = checkbox_text
+                    tree.item(item, values=values)
+        
+        tree.bind("<Button-1>", on_tree_click)
+
+        # Scrollbars (modificadas para el nuevo layout)
+        v_scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=tree.yview)
+        h_scrollbar = ttk.Scrollbar(tree_frame, orient=tk.HORIZONTAL, command=tree.xview)
         tree.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
 
-        # Pack elementos
-        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+        # Layout con grid para mejor control
+        tree.grid(row=0, column=0, sticky="nsew")
+        v_scrollbar.grid(row=0, column=1, sticky="ns")
+        h_scrollbar.grid(row=1, column=0, sticky="ew")
+        
+        tree_frame.grid_rowconfigure(0, weight=1)
+        tree_frame.grid_columnconfigure(0, weight=1)
 
-        # Frame para botones de exportación
-        export_frame = ttk.Frame(main_frame)
-        export_frame.pack(pady=15)
+        # Panel de botones (lado derecho, vertical)
+        botones_frame = ttk.Frame(contenedor_horizontal)
+        botones_frame.pack(side=tk.RIGHT, fill=tk.Y)
         
-        ttk.Label(export_frame, text="📁 Opciones de Exportación:", 
-                 font=("Arial", 10, "bold")).pack(pady=(0, 5))
+        ttk.Label(botones_frame, text="📁 Opciones", font=("Arial", 12, "bold")).pack(pady=(0, 10))
+        ttk.Label(botones_frame, text="💡 Marca los registros\ncon ☑️ para usarlos", 
+                 font=("Arial", 9, "italic"), foreground="gray", justify=tk.CENTER).pack(pady=(0, 15))
         
-        botones_frame = ttk.Frame(export_frame)
-        botones_frame.pack()
+        # Botones principales (verticales)
+        ttk.Button(botones_frame, text="📊 Exportar a Excel", width=18,
+                  command=lambda: self.exportar_excel_checkboxes()).pack(pady=(0, 8))
+        ttk.Button(botones_frame, text="📄 Exportar a CSV", width=18,
+                  command=lambda: self.exportar_csv_checkboxes()).pack(pady=(0, 8))
+        ttk.Button(botones_frame, text="🗑️ Borrar registros", width=18,
+                  command=lambda: self.borrar_checkboxes(historial_window)).pack(pady=(0, 8))
         
-        ttk.Button(botones_frame, text="📊 Exportar a Excel", 
-                  command=lambda: self.exportar_excel()).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Button(botones_frame, text="� Exportar a CSV", 
-                  command=lambda: self.exportar_csv()).pack(side=tk.LEFT)
+        # Separador
+        ttk.Separator(botones_frame, orient='horizontal').pack(fill=tk.X, pady=15)
+        
+        # Botones de selección rápida
+        ttk.Label(botones_frame, text="Selección rápida:", font=("Arial", 10, "bold")).pack(pady=(0, 8))
+        ttk.Button(botones_frame, text="✅ Marcar todo", width=18,
+                  command=lambda: self.marcar_todos_checkboxes(True)).pack(pady=(0, 4))
+        ttk.Button(botones_frame, text="❌ Desmarcar todo", width=18,
+                  command=lambda: self.marcar_todos_checkboxes(False)).pack(pady=(0, 15))
+        
+        ttk.Button(botones_frame, text="❌ Cerrar", width=18,
+                  command=historial_window.destroy).pack(pady=(10, 0))
+
+        # Guardar referencia al tree para los métodos
+        self.current_tree = tree
 
     def configurar_horarios(self):
         """Ventana para configurar franjas horarias con nombres personalizables"""
@@ -1085,6 +1142,205 @@ class ControlAzucarApp:
                         })
 
                 messagebox.showinfo("✅ Éxito", f"📄 Datos exportados correctamente a:\n{filename}")
+            except Exception as e:
+                messagebox.showerror("❌ Error", f"Error al exportar: {str(e)}")
+
+    def marcar_todos_checkboxes(self, marcar=True):
+        """Marcar o desmarcar todos los checkboxes"""
+        if not hasattr(self, '_checkbox_states') or not hasattr(self, 'current_tree'):
+            return
+            
+        tree = self.current_tree
+        checkbox_text = "☑️" if marcar else "☐"
+        
+        for item_id in self._checkbox_states:
+            self._checkbox_states[item_id] = marcar
+            values = list(tree.item(item_id, "values"))
+            if values:
+                values[0] = checkbox_text
+                tree.item(item_id, values=values)
+
+    def obtener_registros_marcados(self):
+        """Obtener lista de registros con checkboxes marcados"""
+        if not hasattr(self, '_checkbox_states') or not hasattr(self, '_tree_registro_map'):
+            return []
+            
+        registros_marcados = []
+        for item_id, marcado in self._checkbox_states.items():
+            if marcado and item_id in self._tree_registro_map:
+                registros_marcados.append(self._tree_registro_map[item_id])
+                
+        return registros_marcados
+
+    def exportar_excel_checkboxes(self):
+        """Exportar registros marcados a Excel"""
+        registros = self.obtener_registros_marcados()
+        
+        if not registros:
+            messagebox.showwarning("⚠️ Sin selección", 
+                                 "Marca al menos un registro (☑️) para exportar.\n\n"
+                                 "💡 Haz click en la columna ☑️ para marcar registros.")
+            return
+            
+        # Exportar solo los registros marcados
+        self.exportar_excel_filtrado(registros)
+
+    def exportar_csv_checkboxes(self):
+        """Exportar registros marcados a CSV"""
+        registros = self.obtener_registros_marcados()
+        
+        if not registros:
+            messagebox.showwarning("⚠️ Sin selección", 
+                                 "Marca al menos un registro (☑️) para exportar.\n\n"
+                                 "💡 Haz click en la columna ☑️ para marcar registros.")
+            return
+            
+        # Exportar solo los registros marcados
+        self.exportar_csv_filtrado(registros)
+
+    def borrar_checkboxes(self, ventana):
+        """Borrar registros marcados"""
+        registros = self.obtener_registros_marcados()
+        
+        if not registros:
+            messagebox.showwarning("⚠️ Sin selección", 
+                                 "Marca al menos un registro (☑️) para borrar.\n\n"
+                                 "💡 Haz click en la columna ☑️ para marcar registros.")
+            return
+            
+        if not messagebox.askyesno("Confirmar borrado", 
+                                  f"¿Seguro que deseas borrar {len(registros)} registro(s)?\n\n"
+                                  "Esta acción no se puede deshacer."):
+            return
+            
+        # Eliminar registros
+        self.datos["registros"] = [r for r in self.datos["registros"] if r not in registros]
+        self.guardar_datos()
+        messagebox.showinfo("✅ Borrado", f"Se han borrado {len(registros)} registro(s)")
+        ventana.destroy()
+        self.mostrar_historial()
+
+    def exportar_excel_filtrado(self, registros_filtrados):
+        """Exportar lista específica de registros a Excel"""
+        if not registros_filtrados:
+            messagebox.showwarning("⚠️ Advertencia", "No hay registros para exportar")
+            return
+
+        filename = filedialog.asksaveasfilename(
+            defaultextension=".xlsx",
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+            title="Exportar registros marcados a Excel"
+        )
+
+        if filename:
+            try:
+                from openpyxl import Workbook
+                from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+                from openpyxl.utils import get_column_letter
+                from datetime import datetime as dt
+
+                # Crear libro
+                wb = Workbook()
+                ws = wb.active
+                ws.title = "Registros Marcados"
+
+                # Estilos
+                header_font = Font(bold=True, color="FFFFFF")
+                header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+                border = Border(
+                    left=Side(style='thin'), right=Side(style='thin'),
+                    top=Side(style='thin'), bottom=Side(style='thin')
+                )
+
+                # Título
+                ws['A1'] = "📊 REGISTROS SELECCIONADOS"
+                ws['A1'].font = Font(bold=True, size=16, color="4472C4")
+                ws.merge_cells('A1:F1')
+                ws['A1'].alignment = Alignment(horizontal='center')
+
+                # Info
+                ws['A2'] = f"📅 Generado: {dt.now().strftime('%d/%m/%Y %H:%M')}"
+                ws['A3'] = f"📊 Registros: {len(registros_filtrados)}"
+
+                # Encabezados
+                headers = ['📅 Fecha', '🕐 Hora', '🍽️ Comida', '📉 Azúcar Antes', '📈 Azúcar Después', '🥗 Alimentos']
+                for col, header in enumerate(headers, 1):
+                    cell = ws.cell(row=5, column=col, value=header)
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.alignment = Alignment(horizontal='center')
+                    cell.border = border
+
+                # Datos
+                for row, registro in enumerate(registros_filtrados, start=6):
+                    nombre_comida = registro.get("nombre_comida", registro.get("tipo_comida", "Sin nombre"))
+                    alimentos_str = ', '.join(registro['alimentos'])
+                    
+                    azucar_antes = registro.get('azucar_antes', '')
+                    azucar_despues = registro.get('azucar_despues', '')
+                    
+                    azucar_antes_str = f"{azucar_antes} mg/dL" if azucar_antes else "-"
+                    azucar_despues_str = f"{azucar_despues} mg/dL" if azucar_despues else "-"
+
+                    datos_fila = [
+                        registro['fecha'], registro['hora'], nombre_comida,
+                        azucar_antes_str, azucar_despues_str, alimentos_str
+                    ]
+
+                    for col, valor in enumerate(datos_fila, 1):
+                        cell = ws.cell(row=row, column=col, value=valor)
+                        cell.border = border
+
+                # Ajustar anchos
+                for col, width in enumerate([12, 8, 20, 15, 15, 40], 1):
+                    ws.column_dimensions[get_column_letter(col)].width = width
+
+                wb.save(filename)
+                messagebox.showinfo("✅ Éxito", f"📊 {len(registros_filtrados)} registros exportados a Excel")
+                
+            except ImportError:
+                messagebox.showerror("❌ Error", "Librería openpyxl no instalada.\nEjecuta: pip install openpyxl")
+            except Exception as e:
+                messagebox.showerror("❌ Error", f"Error al exportar: {str(e)}")
+
+    def exportar_csv_filtrado(self, registros_filtrados):
+        """Exportar lista específica de registros a CSV"""
+        if not registros_filtrados:
+            messagebox.showwarning("⚠️ Advertencia", "No hay registros para exportar")
+            return
+
+        filename = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            title="Exportar registros marcados a CSV"
+        )
+
+        if filename:
+            try:
+                import csv
+                with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
+                    writer = csv.writer(csvfile)
+                    
+                    # Encabezados
+                    writer.writerow(['Fecha', 'Hora', 'Comida', 'Azúcar Antes', 'Azúcar Después', 'Alimentos'])
+                    
+                    # Datos
+                    for registro in registros_filtrados:
+                        nombre_comida = registro.get("nombre_comida", registro.get("tipo_comida", "Sin nombre"))
+                        alimentos_str = ', '.join(registro['alimentos'])
+                        
+                        azucar_antes = registro.get('azucar_antes', '')
+                        azucar_despues = registro.get('azucar_despues', '')
+                        
+                        writer.writerow([
+                            registro['fecha'], registro['hora'], nombre_comida,
+                            azucar_antes if azucar_antes else '',
+                            azucar_despues if azucar_despues else '',
+                            alimentos_str
+                        ])
+
+                messagebox.showinfo("✅ Éxito", f"📄 {len(registros_filtrados)} registros exportados a CSV")
+                
             except Exception as e:
                 messagebox.showerror("❌ Error", f"Error al exportar: {str(e)}")
 
