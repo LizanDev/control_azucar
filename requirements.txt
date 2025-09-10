@@ -1,0 +1,8 @@
+pillow
+requests
+python-dotenv
+pandas
+matplotlib
+openai
+openpyxl
+exifread
